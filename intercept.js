@@ -1,21 +1,18 @@
 (() => {
-  console.log('[sanitiser] installed v2');
+  console.log('[sanitiser] installed v4');
+
   const originalFetch = window.fetch;
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
 
-  let hits = 0;
-  let partialLines = 0;
+  // The only rule for now. This is what the Rust engine will replace.
+  const rewriteText = (s) => s.replace(/\band\b/gi, '&');
 
-  window.fetch = async (...args) => {
-    const response = await originalFetch(...args);
-    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url ?? '';
+  // ---------- streaming path ----------
 
-    if (!response.body || !url.includes('completion')) return response;
-    console.log('[sanitiser] intercepting', url);
-    hits = 0;
-    partialLines = 0;
-
-    const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
+  function rewriteStream(response) {
+    let hits = 0;
+    let partialLines = 0;
 
     const rewriter = new TransformStream({
       transform(chunk, controller) {
@@ -28,16 +25,13 @@
           try {
             obj = JSON.parse(line.slice(6));
           } catch {
-            // Chunk ended mid-line, so this is truncated JSON.
-            // Pass through untouched and count it.
             partialLines++;
             return line;
           }
 
           if (typeof obj?.delta?.text === 'string') {
-            const before = obj.delta.text;
-            const after = before.replace(/\band\b/gi, '&');
-            if (after !== before) {
+            const after = rewriteText(obj.delta.text);
+            if (after !== obj.delta.text) {
               hits++;
               obj.delta.text = after;
               return 'data: ' + JSON.stringify(obj);
@@ -50,9 +44,7 @@
       },
 
       flush() {
-        console.log(
-          `[sanitiser] done. replacements: ${hits}, truncated lines: ${partialLines}`
-        );
+        console.log(`[sanitiser] stream done. replacements: ${hits}, truncated lines: ${partialLines}`);
       }
     });
 
@@ -61,5 +53,98 @@
       statusText: response.statusText,
       headers: response.headers
     });
+  }
+
+  // ---------- history path ----------
+
+  let historyHits = 0;
+
+  function rewriteMessage(m) {
+    if (m?.sender !== 'assistant') return;
+
+    if (typeof m.text === 'string') {
+      const after = rewriteText(m.text);
+      if (after !== m.text) { historyHits++; m.text = after; }
+    }
+
+    if (Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block?.type === 'text' && typeof block.text === 'string') {
+          const after = rewriteText(block.text);
+          if (after !== block.text) { historyHits++; block.text = after; }
+        }
+      }
+    }
+  }
+
+  function rewriteConversation(c) {
+    if (Array.isArray(c?.chat_messages)) c.chat_messages.forEach(rewriteMessage);
+  }
+
+async function rewriteHistory(response) {
+    const raw = await response.text();
+
+    const passthrough = () => new Response(raw, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+
+    let doc;
+    try {
+      doc = JSON.parse(raw);
+    } catch {
+      return passthrough();
+    }
+
+    if (doc === null || typeof doc !== 'object') return passthrough();
+
+    historyHits = 0;
+
+    try {
+      if (Array.isArray(doc)) {
+        doc.forEach(rewriteConversation);
+      } else if (Array.isArray(doc.conversations)) {
+        doc.conversations.forEach(rewriteConversation);
+      } else {
+        rewriteConversation(doc);
+      }
+    } catch (e) {
+      console.warn('[sanitiser] history rewrite failed, passing through', e);
+      return passthrough();
+    }
+
+    console.log(`[sanitiser] history rewritten. replacements: ${historyHits}`);
+
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+
+    return new Response(JSON.stringify(doc), {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+
+  // ---------- dispatch ----------
+
+  window.fetch = async (...args) => {
+    const response = await originalFetch(...args);
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url ?? '';
+
+    if (!response.ok || !response.body) return response;
+
+    if (url.includes('/completion')) {
+      console.log('[sanitiser] intercepting stream');
+      return rewriteStream(response);
+    }
+
+    if (url.includes('/chat_conversations')) {
+      console.log('[sanitiser] intercepting history');
+      return rewriteHistory(response);
+    }
+
+    return response;
   };
 })();
+
