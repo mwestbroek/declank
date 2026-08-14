@@ -7,8 +7,15 @@ pub struct VerbForms {
     pub present_participle: String,
 }
 
+
+#[derive(Debug, PartialEq)]
+pub struct NounForms {
+    pub singular: String,
+    pub plural: String,
+}
+
 // TODO - add more versions
-fn irregular(base: &str) -> Option<VerbForms> {
+fn irregular_verb(base: &str) -> Option<VerbForms> {
     let (third, past, pp, ing) = match base {
         "be"   => ("is", "was", "been", "being"),
         "have" => ("has", "had", "had", "having"),
@@ -24,6 +31,57 @@ fn irregular(base: &str) -> Option<VerbForms> {
     })
 }
 
+// TODO - add more
+fn irregular_noun(base: &str) -> Option<NounForms> {
+    let plural = match base {
+        // English irregulars
+        "man" => "men",
+        "woman" => "women",
+        "child" => "children",
+        "person" => "people",
+        "foot" => "feet",
+        "tooth" => "teeth",
+        "mouse" => "mice",
+        "goose" => "geese",
+
+        // Unchanged
+        "sheep" => "sheep",
+        "fish" => "fish",
+        "series" => "series",
+        "species" => "species",
+        "aircraft" => "aircraft",
+
+        // Latin and Greek. These matter most: they are common in the register
+        // this tool targets, and several would otherwise hit the sibilant rule
+        // and produce "analysises".
+        "analysis" => "analyses",
+        "basis" => "bases",
+        "crisis" => "crises",
+        "thesis" => "theses",
+        "hypothesis" => "hypotheses",
+        "criterion" => "criteria",
+        "phenomenon" => "phenomena",
+        "datum" => "data",
+        "medium" => "media",
+        "index" => "indices",
+        "matrix" => "matrices",
+        "appendix" => "appendices",
+        "vertex" => "vertices",
+
+        // -o taking -oes. No spelling rule separates these from photo/photos,
+        // so the default is -s and the -oes cases live here.
+        "hero" => "heroes",
+        "potato" => "potatoes",
+        "tomato" => "tomatoes",
+        "echo" => "echoes",
+
+        _ => return None,
+    };
+    Some(NounForms {
+        singular: base.to_string(),
+        plural: plural.to_string(),
+    })
+}
 fn is_vowel(letter: char) -> bool {
     matches!(letter, 'a' | 'e' | 'i' | 'o' | 'u')
 }
@@ -56,9 +114,9 @@ fn doubles(base: &str) -> bool {
     }
 }
 
-fn drop_last(base: &str) -> &str {
+fn drop_last(base: &str, n: usize) -> &str {
     // Byte slice: safe for ASCII verbs, which is all the rule book contains.
-    &base[..base.len() - 1]
+    &base[..base.len() - n]
 }
 
 fn third_person(base: &str) -> String {
@@ -71,7 +129,7 @@ fn third_person(base: &str) -> String {
     {
         format!("{base}es")
     } else if ends_in_consonant_then_y(base) {
-        format!("{}ies", drop_last(base))
+        format!("{}ies", drop_last(base, 1))
     } else {
         format!("{base}s")
     }
@@ -81,7 +139,7 @@ fn past(base: &str) -> String {
     if base.ends_with('e') {
         format!("{base}d")
     } else if ends_in_consonant_then_y(base) {
-        format!("{}ied", drop_last(base))
+        format!("{}ied", drop_last(base, 1))
     } else if doubles(base) {
         let last = base.chars().last().unwrap();
         format!("{base}{last}ed")
@@ -98,7 +156,7 @@ fn present_participle(base: &str) -> String {
         // see -> seeing, dye -> dyeing
         format!("{base}ing")
     } else if base.ends_with('e') {
-        format!("{}ing", drop_last(base))
+        format!("{}ing", drop_last(base, 1))
     } else if doubles(base) {
         let last = base.chars().last().unwrap();
         format!("{base}{last}ing")
@@ -108,7 +166,7 @@ fn present_participle(base: &str) -> String {
 }
 
 pub fn verb_forms(base: &str) -> VerbForms {
-    if let Some(forms) = irregular(base) {
+    if let Some(forms) = irregular_verb(base) {
         return forms;
     }
     VerbForms {
@@ -118,6 +176,45 @@ pub fn verb_forms(base: &str) -> VerbForms {
         past_participle: past(base),
         present_participle: present_participle(base),
     }
+}
+
+const F_KEEPS_S: &[&str] = &[
+    "roof", "chief", "belief", "proof", "cliff", "brief", "grief", "chef",
+];
+
+fn plural(base: &str) -> String {
+    if base.ends_with('s')
+    || base.ends_with('x')
+    || base.ends_with('z')
+    || base.ends_with("ch")
+    || base.ends_with("sh")
+    {
+
+        format!("{base}es")
+    }
+    else if ends_in_consonant_then_y(base) {
+        format!("{}ies", drop_last(base, 1))
+    }
+    else if base.ends_with("fe") {
+        format!("{}ves", drop_last(base, 2))
+    }
+    else if base.ends_with('f') && !F_KEEPS_S.contains(&base) {
+        format!("{}ves", drop_last(base, 1))
+    }
+    else {
+        format!("{base}s")
+    }
+}
+
+pub fn noun_forms(base: &str) -> NounForms {
+    if let Some(forms) = irregular_noun(base) {
+        return forms;
+    }
+    NounForms {
+        singular: base.to_string(),
+        plural: plural(base),
+    }
+
 }
 
 #[cfg(test)]
@@ -311,5 +408,82 @@ mod tests {
         // "offer" to the irregular table shows up as a failing test.
         assert_eq!(past("prefer"), "preferred"); // correct by luck
         // assert_eq!(past("offer"), "offerred"); // WRONG, should be "offered"
+    }
+
+    #[test]
+    fn plural_default() {
+        check(&[("tool", "tools"), ("platform", "platforms")], plural);
+    }
+
+    #[test]
+    fn plural_sibilants_take_es() {
+        check(
+            &[("bus", "buses"), ("box", "boxes"), ("approach", "approaches"), ("dish", "dishes")],
+            plural,
+        );
+    }
+
+    #[test]
+    fn plural_consonant_y_becomes_ies() {
+        check(&[("intricacy", "intricacies"), ("company", "companies")], plural);
+    }
+
+    #[test]
+    fn plural_vowel_y_keeps_y() {
+        check(&[("journey", "journeys"), ("day", "days")], plural);
+    }
+
+    #[test]
+    fn plural_f_becomes_ves() {
+        check(&[("leaf", "leaves"), ("half", "halves"), ("shelf", "shelves")], plural);
+    }
+
+    #[test]
+    fn plural_fe_becomes_ves() {
+        check(&[("knife", "knives"), ("life", "lives"), ("wife", "wives")], plural);
+    }
+
+    #[test]
+    fn plural_f_exceptions_keep_s() {
+        // "belief" matters most: "believes" is a real verb form and would
+        // collide with a verb rule in the matcher.
+        check(&[("roof", "roofs"), ("chief", "chiefs"), ("belief", "beliefs")], plural);
+    }
+
+    #[test]
+    fn plural_o_defaults_to_s() {
+        check(&[("photo", "photos"), ("piano", "pianos"), ("memo", "memos")], plural);
+    }
+
+    #[test]
+    fn irregular_nouns_short_circuit() {
+        assert_eq!(noun_forms("child").plural, "children");
+        assert_eq!(noun_forms("person").plural, "people");
+        assert_eq!(noun_forms("sheep").plural, "sheep");
+        assert_eq!(noun_forms("hero").plural, "heroes");
+    }
+
+    #[test]
+    fn latin_plurals_do_not_hit_the_sibilant_rule() {
+        assert_eq!(noun_forms("analysis").plural, "analyses");
+        assert_eq!(noun_forms("basis").plural, "bases");
+        assert_eq!(noun_forms("criterion").plural, "criteria");
+        assert_eq!(noun_forms("phenomenon").plural, "phenomena");
+    }
+
+    #[test]
+    fn regular_noun_full_set() {
+        assert_eq!(
+            noun_forms("intricacy"),
+            NounForms { singular: "intricacy".into(), plural: "intricacies".into() }
+        );
+    }
+
+    // ---------- known limitations ----------
+
+    #[test]
+    fn z_does_not_double() {
+        // Real English is "quizzes". Pinning the wrong answer.
+        assert_eq!(plural("quiz"), "quizes");
     }
 }
