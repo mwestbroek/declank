@@ -1,3 +1,5 @@
+mod rules;
+
 use regex::Regex;
 use wasm_bindgen::prelude::*;
 
