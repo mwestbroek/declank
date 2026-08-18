@@ -14,17 +14,10 @@ pub enum RuleKind {
     Template(TemplateRule),
 }
 
-
 pub struct LiteralRule {
     pub pattern: String,
     pub replacement: String,
 }
-pub struct CompiledLiteral {
-    pub id: String,
-    pub pattern: String,
-    pub replacement: String,
-}
-
 
 pub struct LemmaRule {
     pub pattern: String, 
@@ -55,11 +48,8 @@ pub struct TemplateRule {
     tail: Option<Hole>,
     replacement: Vec<ReplacementPart>,
 }
-pub struct CompiledTemplate {
-    pub id: String,
-    pub rule: TemplateRule,
-}
 
+#[derive(Debug)]
 pub enum TemplateValidationError {
     EmptyTemplate,
     EmptyLead,
@@ -68,33 +58,6 @@ pub enum TemplateValidationError {
     TooManyHoles,
     UnclosedBrace,
     UnknownHoleInReplacement,
-}
-
-fn capitalise(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-    }
-}
-
-pub fn compile_literal(id: &str, rule: &LiteralRule) -> Vec<CompiledLiteral> {
-    let mut rules = vec![CompiledLiteral {
-        id: id.to_string(),
-        pattern: rule.pattern.clone(),
-        replacement: rule.replacement.clone(),
-    }];
-
-    let capitalised = capitalise(&rule.pattern);
-    if capitalised != rule.pattern {
-        rules.push(CompiledLiteral {
-            id: id.to_string(),
-            pattern: capitalised,
-            replacement: capitalise(&rule.replacement),
-        });
-    }
-
-    rules
 }
 
 pub fn expand_lemma(rule: &LemmaRule) -> Vec<LiteralRule> {
@@ -231,11 +194,6 @@ pub fn parse_template(pattern: &str, replacement: &str) -> Result<TemplateRule, 
     
     Ok(TemplateRule{ lead, pairs, tail, replacement: replacement_segments })
 
-}
-
-
-pub fn compile_template(id: &str, rule: TemplateRule) -> CompiledTemplate {
-    CompiledTemplate { id: id.to_string(), rule }
 }
 
 
