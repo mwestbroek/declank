@@ -1,5 +1,7 @@
 use crate::inflect::{noun_forms, verb_forms};
 
+const MAX_HOLES: u8 = 3;
+
 pub struct Rule {
     pub id: String, 
     pub enabled: bool,
@@ -34,6 +36,11 @@ pub enum LemmaKind {
     Verb,
 }
 
+enum Segment {
+    Text(String),
+    Hole(Hole),
+}
+
 pub struct Hole {
     name: String,
 }
@@ -54,6 +61,7 @@ pub struct CompiledTemplate {
 }
 
 pub enum TemplateValidationError {
+    EmptyTemplate,
     EmptyLead,
     NoHoles,
     AdjacentHoles,
@@ -116,14 +124,91 @@ pub fn expand_lemma(rule: &LemmaRule) -> Vec<LiteralRule> {
 
 }
 
+fn find_segments(raw: &str) -> Result<Vec<Segment>, TemplateValidationError> {
+    let mut segments = Vec::new();
+    let mut cursor = 0;
+
+    loop {
+        let rest = &raw[cursor..];
+
+        let Some(open) = rest.find('{') else {
+            // No more holes: whatever remains is text.
+            if !rest.is_empty() {
+                segments.push(Segment::Text(rest.to_string()));
+            }
+            break;
+        };
+
+        // Only look for the closer after the opener.
+        let Some(close) = rest[open..].find('}') else {
+            return Err(TemplateValidationError::UnclosedBrace);
+        };
+        let close = open + close;
+
+        if open > 0 {
+            segments.push(Segment::Text(rest[..open].to_string()));
+        }
+
+        // Braces are single-byte, so these offsets are safe.
+        let name = rest[open + 1..close].to_string();
+        segments.push(Segment::Hole(Hole { name }));
+
+        cursor += close + 1;
+    }
+
+    Ok(segments)
+}
 
 pub fn parse_template(pattern: &str, replacement: &str) -> Result<TemplateRule, TemplateValidationError> {
+    let mut pattern_segments = find_segments(pattern)?.into_iter();
+    let lead = match pattern_segments.next() {
+        None => return Err(TemplateValidationError::EmptyTemplate),
+        Some(Segment::Hole(_)) => return Err(TemplateValidationError::EmptyLead),
+        Some(Segment::Text(text)) => text,
+    };
+
+    let mut num_holes = 0;
+    let mut tail = None;
+    let mut pairs = Vec::new();
+    while let Some(segment) = pattern_segments.next() {
+        let hole = match segment {
+            Segment::Hole(h) => {
+                num_holes += 1;
+                h
+            }
+            Segment::Text(_) => unreachable!("segments alternate"),
+        };
+
+        match pattern_segments.next() {
+            Some(Segment::Hole(h)) => return Err(TemplateValidationError::AdjacentHoles),
+            Some(Segment::Text(text)) => pairs.push((hole, text)),
+            None => {
+                tail = Some(hole);
+                break;
+            }
+        }
+    } 
+
+    if num_holes > MAX_HOLES {
+        return Err(TemplateValidationError::TooManyHoles);
+    } 
+    if num_holes == 0 {
+        return Err(TemplateValidationError::NoHoles);
+    }
+
+
+    let replacement_segments = find_segments(replacement)?.into_iter().map(|s| match s {
+        Segment::Text(text) => ReplacementPart::Text(text),
+        Segment::Hole(hole) => ReplacementPart::Hole(hole),
+    }).collect();
+    
+    Ok(TemplateRule{ lead: lead, pairs: pairs, tail: tail, replacement: replacement_segments })
 
 }
 
 
 pub fn compile_template(id: &str, rule: TemplateRule) -> CompiledTemplate {
-
+    CompiledTemplate { id: id.to_string(), rule }
 }
 
 
