@@ -1,5 +1,7 @@
-mod rules;
+mod book;
+mod compile;
 mod inflect;
+mod rules;
 
 use regex::Regex;
 use wasm_bindgen::prelude::*;
