@@ -1,6 +1,6 @@
 use crate::inflect::{noun_forms, verb_forms};
 
-const MAX_HOLES: u8 = 3;
+const MAX_HOLES: usize = 3;
 
 pub struct Rule {
     pub id: String, 
@@ -67,6 +67,7 @@ pub enum TemplateValidationError {
     AdjacentHoles,
     TooManyHoles,
     UnclosedBrace,
+    UnknownHoleInReplacement,
 }
 
 fn capitalise(s: &str) -> String {
@@ -159,6 +160,28 @@ fn find_segments(raw: &str) -> Result<Vec<Segment>, TemplateValidationError> {
     Ok(segments)
 }
 
+fn check_all_replacement_parts_valid(
+    pairs: &[(Hole, String)],
+    tail: &Option<Hole>,
+    replacements: &[ReplacementPart],
+) -> Result<(), TemplateValidationError> {
+    let pattern_names: Vec<&str> = pairs
+        .iter()
+        .map(|(hole, _)| hole.name.as_str())
+        .chain(tail.iter().map(|hole| hole.name.as_str()))
+        .collect();
+
+    for part in replacements {
+        if let ReplacementPart::Hole(hole) = part {
+            if !pattern_names.iter().any(|n| *n == hole.name) {
+                return Err(TemplateValidationError::UnknownHoleInReplacement);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn parse_template(pattern: &str, replacement: &str) -> Result<TemplateRule, TemplateValidationError> {
     let mut pattern_segments = find_segments(pattern)?.into_iter();
     let lead = match pattern_segments.next() {
@@ -180,7 +203,7 @@ pub fn parse_template(pattern: &str, replacement: &str) -> Result<TemplateRule, 
         };
 
         match pattern_segments.next() {
-            Some(Segment::Hole(h)) => return Err(TemplateValidationError::AdjacentHoles),
+            Some(Segment::Hole(_)) => return Err(TemplateValidationError::AdjacentHoles),
             Some(Segment::Text(text)) => pairs.push((hole, text)),
             None => {
                 tail = Some(hole);
@@ -197,12 +220,17 @@ pub fn parse_template(pattern: &str, replacement: &str) -> Result<TemplateRule, 
     }
 
 
-    let replacement_segments = find_segments(replacement)?.into_iter().map(|s| match s {
-        Segment::Text(text) => ReplacementPart::Text(text),
-        Segment::Hole(hole) => ReplacementPart::Hole(hole),
-    }).collect();
+    let replacement_segments: Vec<ReplacementPart> = find_segments(replacement)?
+        .into_iter()
+        .map(|s| match s {
+            Segment::Text(text) => ReplacementPart::Text(text),
+            Segment::Hole(hole) => ReplacementPart::Hole(hole),
+        })
+        .collect();
+
+    check_all_replacement_parts_valid(&pairs, &tail, &replacement_segments)?;
     
-    Ok(TemplateRule{ lead: lead, pairs: pairs, tail: tail, replacement: replacement_segments })
+    Ok(TemplateRule{ lead, pairs, tail, replacement: replacement_segments })
 
 }
 
