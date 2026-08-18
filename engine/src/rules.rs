@@ -172,11 +172,10 @@ fn check_all_replacement_parts_valid(
         .collect();
 
     for part in replacements {
-        if let ReplacementPart::Hole(hole) = part {
-            if !pattern_names.iter().any(|n| *n == hole.name) {
+        if let ReplacementPart::Hole(hole) = part
+            && !pattern_names.iter().any(|n| *n == hole.name) {
                 return Err(TemplateValidationError::UnknownHoleInReplacement);
             }
-        }
     }
 
     Ok(())
