@@ -35,7 +35,7 @@ enum Segment {
 }
 
 pub struct Hole {
-    name: String,
+    pub name: String,
 }
 pub enum ReplacementPart {
     Text(String),
@@ -43,10 +43,10 @@ pub enum ReplacementPart {
 }
 
 pub struct TemplateRule {
-    lead: String,
-    pairs: Vec<(Hole, String)>,
-    tail: Option<Hole>,
-    replacement: Vec<ReplacementPart>,
+    pub lead: String,
+    pub pairs: Vec<(Hole, String)>,
+    pub tail: Option<Hole>,
+    pub replacement: Vec<ReplacementPart>,
 }
 
 #[derive(Debug)]

@@ -19,7 +19,7 @@ fn rules() -> &'static CompiledRules {
 #[wasm_bindgen]
 pub fn declank(input: &str) -> String { 
     let rules = rules();
-    rewrite(input, &rules.literals)
+    rewrite(input, &rules)
 }
 
 
