@@ -1,7 +1,6 @@
 use crate::rules::{LemmaKind, LemmaRule, LiteralRule, Rule, RuleKind, parse_template};
 
-/// The rule book. Hard-coded for now; see plan section 9 for the eventual UI.
-///
+/// The rule book. Hard-coded for now
 /// Panics if a template fails validation. That is a programming error while the
 /// book is a constant, and should become a proper error path once rules can be
 /// authored at runtime.
