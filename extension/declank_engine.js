@@ -8,13 +8,13 @@ let wasm_bindgen = (function(exports) {
      * @param {string} input
      * @returns {string}
      */
-    function rewrite(input) {
+    function declank(input) {
         let deferred2_0;
         let deferred2_1;
         try {
             const ptr0 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.rewrite(ptr0, len0);
+            const ret = wasm.declank(ptr0, len0);
             deferred2_0 = ret[0];
             deferred2_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
@@ -22,7 +22,7 @@ let wasm_bindgen = (function(exports) {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
-    exports.rewrite = rewrite;
+    exports.declank = declank;
     function __wbg_get_imports() {
         const import0 = {
             __proto__: null,
