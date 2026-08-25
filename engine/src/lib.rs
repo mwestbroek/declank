@@ -2,6 +2,7 @@ mod book;
 mod compile;
 mod inflect;
 mod rules;
+mod rewrite;
 
 use regex::Regex;
 use wasm_bindgen::prelude::*;
