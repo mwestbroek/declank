@@ -1,4 +1,9 @@
-use crate::compile::CompiledLiteral;
+use std::collections::HashMap;
+
+use crate::{
+    compile::{CompiledLiteral, CompiledTemplate},
+    rules::ReplacementPart,
+};
 
 pub struct Match {
     pub start: usize,
@@ -7,16 +12,19 @@ pub struct Match {
     pub replacement: String,
 }
 
-fn has_word_boundaries(sentence: &str, start: usize, end: usize) -> bool {
-    let before_ok = sentence[..start]
+fn has_leading_word_boundary(sentence: &str, start: usize) -> bool {
+    sentence[..start]
         .chars()
         .next_back()
-        .is_none_or(|c| !c.is_alphanumeric());
+        .is_none_or(|c| !c.is_alphanumeric())
+}
+
+fn has_word_boundaries(sentence: &str, start: usize, end: usize) -> bool {
     let after_ok = sentence[end..]
         .chars()
         .next()
         .is_none_or(|c| !c.is_alphanumeric());
-    before_ok && after_ok
+    has_leading_word_boundary(sentence, start) && after_ok
 }
 
 fn find_literal_matches(sentence: &str, rules: &[CompiledLiteral]) -> Vec<Match> {
@@ -33,6 +41,60 @@ fn find_literal_matches(sentence: &str, rules: &[CompiledLiteral]) -> Vec<Match>
                 rule_id: rule.id.clone(),
                 replacement: rule.replacement.clone(),
             });
+        }
+    }
+
+    matches
+}
+
+fn find_template_matches(sentence: &str, templates: &[CompiledTemplate]) -> Vec<Match> {
+    let mut matches = Vec::new();
+    for template in templates {
+        // Find all the leads
+        'outer: for (lead_idx, _) in sentence.match_indices(&template.rule.lead) {
+            // Ensure the lead is not part of a word
+            let lead = &template.rule.lead;
+            if !has_leading_word_boundary(sentence, lead_idx) {
+                continue;
+            }
+            let mut cursor = lead_idx + lead.len();
+            // Ensure all text following holes is found
+            let mut hole_contents = HashMap::new();
+            for (hole, following_text) in &template.rule.pairs {
+                match sentence[cursor..].find(following_text) {
+                    None => {
+                        continue 'outer;
+                    }
+                    Some(found_idx) => {
+                        let found = cursor + found_idx; // found_idx is relative to the slice
+                        hole_contents.insert(hole.name.as_str(), &sentence[cursor..found]);
+                        cursor = found + following_text.len();
+                    }
+                };
+            }
+            if let Some(tail) = &template.rule.tail {
+                hole_contents.insert(tail.name.as_str(), &sentence[cursor..]);
+                cursor = sentence.len();
+            };
+            // The match spans from lead_idx to cursor
+            let mut replacement = String::new();
+            for replacement_part in &template.rule.replacement {
+                match replacement_part {
+                    ReplacementPart::Hole(hole) => replacement.push_str(
+                        hole_contents
+                            .get(hole.name.as_str())
+                            .copied()
+                            .unwrap_or_else(|| panic!("hole {:?} not captured", hole.name))
+                    ),
+                    ReplacementPart::Text(text) => replacement.push_str(text),
+                };
+            }
+            matches.push(Match {
+                start: lead_idx,
+                end: cursor,
+                rule_id: template.id.clone(),
+                replacement,
+            })
         }
     }
 
@@ -81,7 +143,6 @@ pub fn rewrite(sentence: &str, rules: &[CompiledLiteral]) -> String {
     apply(sentence, &sorted_matches)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,7 +159,10 @@ mod tests {
 
     #[test]
     fn case_a_two_matches_in_one_sentence() {
-        let rules = [lit("utilise", "utilise", "use"), lit("delve", "delve", "look")];
+        let rules = [
+            lit("utilise", "utilise", "use"),
+            lit("delve", "delve", "look"),
+        ];
         assert_eq!(
             rewrite("We utilise this to delve into the data.", &rules),
             "We use this to look into the data."
@@ -177,7 +241,11 @@ mod tests {
 
     #[test]
     fn multi_word_patterns_match() {
-        let rules = [lit("fast-paced", "in today's fast-paced world", "currently")];
+        let rules = [lit(
+            "fast-paced",
+            "in today's fast-paced world",
+            "currently",
+        )];
         assert_eq!(
             rewrite("In today's fast-paced world things move.", &rules),
             "In today's fast-paced world things move."
@@ -198,7 +266,10 @@ mod tests {
         // step's job, not apply's.
         let rules = [lit("crucial", "it is crucial to note that", "")];
         assert_eq!(
-            rewrite("We know it is crucial to note that the system fails.", &rules),
+            rewrite(
+                "We know it is crucial to note that the system fails.",
+                &rules
+            ),
             "We know  the system fails."
         );
     }
