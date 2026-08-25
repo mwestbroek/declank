@@ -1,4 +1,4 @@
-console.log('[declank] installed v6');
+console.log('[declank] installed v7');
 
 const originalFetch = window.fetch;
 const decoder = new TextDecoder();
@@ -10,45 +10,163 @@ const ready = wasm_bindgen({ module_or_path: wasmBytes }).then(() => {
   console.log('[declank] engine ready');
 });
 
-const rewrite = (s) => wasm_bindgen.rewrite(s);
+const declank = (s) => wasm_bindgen.declank(s);
+
+// Hold back at most this much text while waiting for a sentence boundary.
+// Bounds both latency and how much could be lost if a stream ends abnormally.
+const MAX_HOLD = 400;
+
+// ---------- sentence splitting ----------
 //
+// Naive: a full stop, question mark or exclamation mark followed by whitespace,
+// or a newline. Known to be wrong on "e.g.", "Dr.", decimals and ellipses.
+// Newlines count because headings, list items and table rows often contain no
+// terminator at all and would otherwise never flush.
+
+function isBoundaryAt(text, i) {
+  const c = text[i];
+  if (c === '\n') return true;
+  if (c === '.' || c === '!' || c === '?') {
+    const next = text[i + 1];
+    return next !== undefined && /\s/.test(next);
+  }
+  return false;
+}
+
+/** Index just past the last boundary, or 0 if there is none. */
+function lastBoundary(text) {
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (isBoundaryAt(text, i)) return i + 1;
+  }
+  return 0;
+}
+
+/** Split into sentence-ish chunks. Concatenating the result reproduces the input. */
+function splitSentences(text) {
+  const out = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (isBoundaryAt(text, i)) {
+      out.push(text.slice(start, i + 1));
+      start = i + 1;
+    }
+  }
+  if (start < text.length) out.push(text.slice(start));
+  return out;
+}
+
+function rewriteWhole(text) {
+  return splitSentences(text).map(declank).join('');
+}
+
 // ---------- streaming path ----------
 
 function rewriteStream(response) {
-  let hits = 0;
-  let partialLines = 0;
+  let lineBuffer = '';
+  let sentenceBuffer = '';
+  let pendingEvent = null;
+  let lastIndex = 0;
+  let flushedAtEnd = false;
+
+  // Emit whatever is held back as a synthetic delta event.
+  function flushSentenceBuffer() {
+    if (sentenceBuffer.length === 0) return [];
+    const text = declank(sentenceBuffer);
+    sentenceBuffer = '';
+    const event = {
+      type: 'content_block_delta',
+      index: lastIndex,
+      delta: { type: 'text_delta', text }
+    };
+    return ['event: content_block_delta', 'data: ' + JSON.stringify(event)];
+  }
+
+  function processLine(line) {
+    // Hold the event line so it can be emitted together with its data line.
+    if (line.startsWith('event: ')) {
+      pendingEvent = line;
+      return [];
+    }
+
+    if (!line.startsWith('data: ')) return [line];
+
+    const eventLine = pendingEvent;
+    pendingEvent = null;
+    const emit = (dataLine, before = []) =>
+      eventLine ? [...before, eventLine, dataLine] : [...before, dataLine];
+
+    let obj;
+    try {
+      obj = JSON.parse(line.slice(6));
+    } catch (e) {
+      // Should not happen now that lines are reassembled before parsing.
+      console.warn('[declank] unparseable data line, passing through');
+      return emit(line);
+    }
+
+    if (obj?.type === 'content_block_delta' && typeof obj?.delta?.text === 'string') {
+      if (typeof obj.index === 'number') lastIndex = obj.index;
+
+      sentenceBuffer += obj.delta.text;
+
+      let ready = '';
+      const cut = lastBoundary(sentenceBuffer);
+      if (cut > 0) {
+        ready = declank(sentenceBuffer.slice(0, cut));
+        sentenceBuffer = sentenceBuffer.slice(cut);
+      } else if (sentenceBuffer.length > MAX_HOLD) {
+        // No boundary in sight. Release rather than hold indefinitely.
+        ready = declank(sentenceBuffer);
+        sentenceBuffer = '';
+      }
+
+      obj.delta.text = ready;
+      return emit('data: ' + JSON.stringify(obj));
+    }
+
+    // Flush the tail before the block or message closes.
+    if (
+      obj?.type === 'content_block_stop' ||
+      obj?.type === 'message_delta' ||
+      obj?.type === 'message_stop'
+    ) {
+      const injected = flushSentenceBuffer();
+      if (injected.length > 0) flushedAtEnd = true;
+      return emit(line, injected);
+    }
+
+    return emit(line);
+  }
 
   const rewriter = new TransformStream({
     transform(chunk, controller) {
-      const text = decoder.decode(chunk, { stream: true });
+      lineBuffer += decoder.decode(chunk, { stream: true });
 
-      const out = text.split('\n').map(line => {
-        if (!line.startsWith('data: ')) return line;
+      const lines = lineBuffer.split('\n');
+      // The final element may be an incomplete line; keep it for the next chunk.
+      lineBuffer = lines.pop();
 
-        let obj;
-        try {
-          obj = JSON.parse(line.slice(6));
-        } catch {
-          partialLines++;
-          return line;
-        }
+      const out = [];
+      for (const line of lines) out.push(...processLine(line));
 
-        if (typeof obj?.delta?.text === 'string') {
-          const after = rewrite(obj.delta.text);
-          if (after !== obj.delta.text) {
-            hits++;
-            obj.delta.text = after;
-            return 'data: ' + JSON.stringify(obj);
-          }
-        }
-        return line;
-      }).join('\n');
-
-      controller.enqueue(encoder.encode(out));
+      if (out.length > 0) {
+        controller.enqueue(encoder.encode(out.join('\n') + '\n'));
+      }
     },
 
-    flush() {
-      console.log(`[declank] stream done. replacements: ${hits}, truncated lines: ${partialLines}`);
+    flush(controller) {
+      const out = [];
+      if (lineBuffer.length > 0) out.push(...processLine(lineBuffer));
+      if (pendingEvent) out.push(pendingEvent);
+      out.push(...flushSentenceBuffer());
+
+      if (out.length > 0) {
+        controller.enqueue(encoder.encode(out.join('\n')));
+      }
+      if (!flushedAtEnd && sentenceBuffer.length > 0) {
+        console.warn('[declank] stream ended with text still buffered');
+      }
+      console.log('[declank] stream done');
     }
   });
 
@@ -67,14 +185,14 @@ function rewriteMessage(m) {
   if (m?.sender !== 'assistant') return;
 
   if (typeof m.text === 'string') {
-    const after = rewrite(m.text);
+    const after = rewriteWhole(m.text);
     if (after !== m.text) { historyHits++; m.text = after; }
   }
 
   if (Array.isArray(m.content)) {
     for (const block of m.content) {
       if (block?.type === 'text' && typeof block.text === 'string') {
-        const after = rewrite(block.text);
+        const after = rewriteWhole(block.text);
         if (after !== block.text) { historyHits++; block.text = after; }
       }
     }
@@ -141,7 +259,6 @@ window.fetch = async (...args) => {
   const interesting = url.includes('/completion') || url.includes('/chat_conversations');
   if (!interesting) return response;
 
-  // Engine may still be loading. Awaiting a settled promise costs one microtask.
   try {
     await ready;
   } catch (e) {
