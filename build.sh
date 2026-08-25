@@ -3,6 +3,9 @@
 set -e
 
 cd engine
+
+cargo test
+
 wasm-pack build --target no-modules
 cp pkg/declank_engine.js ../extension/
 {
