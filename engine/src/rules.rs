@@ -1,4 +1,5 @@
 use crate::inflect::{noun_forms, verb_forms};
+use std::fmt::Display;
 
 const MAX_HOLES: usize = 3;
 
@@ -57,7 +58,21 @@ pub enum TemplateValidationError {
     AdjacentHoles,
     TooManyHoles,
     UnclosedBrace,
-    UnknownHoleInReplacement,
+    UnknownHoleInReplacement(String),
+}
+
+impl Display for TemplateValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TemplateValidationError::EmptyTemplate => write!(f, "template is empty"),
+            TemplateValidationError::EmptyLead => write!(f, "lead is empty"),
+            TemplateValidationError::NoHoles => write!(f, "no holes in template"),
+            TemplateValidationError::AdjacentHoles => write!(f, "adjacent holes in template"),
+            TemplateValidationError::TooManyHoles => write!(f, "too many holes in template"),
+            TemplateValidationError::UnclosedBrace => write!(f, "unclosed brace in template"),
+            TemplateValidationError::UnknownHoleInReplacement(name) => write!(f, "unknown hole in replacement: {}", name),
+        }
+    }
 }
 
 pub fn expand_lemma(rule: &LemmaRule) -> Vec<LiteralRule> {
@@ -137,7 +152,7 @@ fn check_all_replacement_parts_valid(
     for part in replacements {
         if let ReplacementPart::Hole(hole) = part
             && !pattern_names.iter().any(|n| *n == hole.name) {
-                return Err(TemplateValidationError::UnknownHoleInReplacement);
+                return Err(TemplateValidationError::UnknownHoleInReplacement(hole.name.clone()));
             }
     }
 
