@@ -1,4 +1,4 @@
-console.log('[declank] installed v7');
+console.log('[declank] installed');
 
 const originalFetch = window.fetch;
 const decoder = new TextDecoder();
@@ -55,8 +55,55 @@ function splitSentences(text) {
   return out;
 }
 
+// ---------- code protection ----------
+//
+// The engine has no idea what markdown is, so anything that must not be
+// rewritten is filtered out here and never reaches it.
+//
+// Fenced blocks need state that survives across chunks, since a fence opens in
+// one delta and closes many deltas later. That state lives in the caller and is
+// threaded through, which is why these take a `state` argument rather than
+// keeping their own.
+//
+// Deliberately shallow. It does not understand nested fences, fences inside
+// blockquotes, or indented four-space code blocks. Those can be added when
+// they actually cause trouble.
+
+function isFenceLine(unit) {
+  const trimmed = unit.trim();
+  return trimmed.startsWith('```') || trimmed.startsWith('~~~');
+}
+
+/** Rewrite prose while leaving `inline code spans` untouched. */
+function rewriteInline(text) {
+  // The capture group keeps the delimiters in the output of split(), so the
+  // pieces can be reassembled exactly.
+  return text
+    .split(/(`[^`\n]*`)/)
+    .map(part => (part.startsWith('`') ? part : declank(part)))
+    .join('');
+}
+
+/** Process one sentence-ish unit, honouring and updating fence state. */
+function processUnit(unit, state) {
+  if (isFenceLine(unit)) {
+    state.inFence = !state.inFence;
+    return unit;
+  }
+  if (state.inFence) return unit;
+  return rewriteInline(unit);
+}
+
+/** Split a run of text into units and process each one. */
+function processText(text, state) {
+  return splitSentences(text)
+    .map(unit => processUnit(unit, state))
+    .join('');
+}
+
+/** Whole-message entry point: fence state starts fresh each time. */
 function rewriteWhole(text) {
-  return splitSentences(text).map(declank).join('');
+  return processText(text, { inFence: false });
 }
 
 // ---------- streaming path ----------
@@ -68,10 +115,13 @@ function rewriteStream(response) {
   let lastIndex = 0;
   let flushedAtEnd = false;
 
+  // One response is one message, so a single fence state spans the stream.
+  const fenceState = { inFence: false };
+
   // Emit whatever is held back as a synthetic delta event.
   function flushSentenceBuffer() {
     if (sentenceBuffer.length === 0) return [];
-    const text = declank(sentenceBuffer);
+    const text = processText(sentenceBuffer, fenceState);
     sentenceBuffer = '';
     const event = {
       type: 'content_block_delta',
@@ -112,11 +162,14 @@ function rewriteStream(response) {
       let ready = '';
       const cut = lastBoundary(sentenceBuffer);
       if (cut > 0) {
-        ready = declank(sentenceBuffer.slice(0, cut));
+        ready = processText(sentenceBuffer.slice(0, cut), fenceState);
         sentenceBuffer = sentenceBuffer.slice(cut);
       } else if (sentenceBuffer.length > MAX_HOLD) {
         // No boundary in sight. Release rather than hold indefinitely.
-        ready = declank(sentenceBuffer);
+        // A partial line cannot be recognised as a fence marker, so a fence
+        // opened by an unusually long line would be missed. Rare enough to
+        // accept.
+        ready = processText(sentenceBuffer, fenceState);
         sentenceBuffer = '';
       }
 
@@ -165,6 +218,9 @@ function rewriteStream(response) {
       }
       if (!flushedAtEnd && sentenceBuffer.length > 0) {
         console.warn('[declank] stream ended with text still buffered');
+      }
+      if (fenceState.inFence) {
+        console.warn('[declank] stream ended inside an unclosed code fence');
       }
       console.log('[declank] stream done');
     }
