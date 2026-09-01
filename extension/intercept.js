@@ -6,7 +6,7 @@ const encoder = new TextEncoder();
 
 const wasmBytes = Uint8Array.from(atob(self.DECLANK_WASM_B64), c => c.charCodeAt(0));
 
-const ready = wasm_bindgen({ module_or_path: wasmBytes }).then(() => {
+const engineReady = wasm_bindgen({ module_or_path: wasmBytes }).then(() => {
   console.log('[declank] engine ready');
 });
 
@@ -15,6 +15,56 @@ const declank = (s) => wasm_bindgen.declank(s);
 // Hold back at most this much text while waiting for a sentence boundary.
 // Bounds both latency and how much could be lost if a stream ends abnormally.
 const MAX_HOLD = 400;
+
+// ---------- rules ----------
+//
+// The isolated-world script owns storage and posts the book across. Rewriting
+// is gated on the first book arriving, otherwise the conversation fetch on page
+// load races the rule delivery and silently passes through unrewritten.
+//
+// The tags must match defaults.js. They are duplicated here because the MAIN
+// world cannot load that file: it is an isolated-world script.
+const DECLANK_MAIN = 'declank-main';
+const DECLANK_ISOLATED = 'declank-isolated';
+
+// If the isolated half never answers, stop waiting and carry on. With no rules
+// loaded the engine returns its input unchanged, so interception is harmless.
+// Blocking indefinitely would stall the page, which is not.
+const RULES_TIMEOUT_MS = 3000;
+
+let markRulesSettled;
+const rulesSettled = new Promise((resolve) => { markRulesSettled = resolve; });
+
+const rulesOrTimeout = Promise.race([
+  rulesSettled,
+  new Promise((resolve) => setTimeout(() => resolve('timeout'), RULES_TIMEOUT_MS))
+]);
+
+async function applyBook(json) {
+  await engineReady;
+  try {
+    const report = JSON.parse(wasm_bindgen.set_rules(json));
+    if (report.errors && report.errors.length > 0) {
+      console.warn('[declank] rules rejected:', report.errors);
+    }
+    console.log(`[declank] ${report.loaded} rules loaded`);
+  } catch (e) {
+    console.warn('[declank] rule book rejected, keeping previous rules', e);
+  }
+  markRulesSettled('settled');
+}
+
+// Installed synchronously so nothing posted by the isolated half is missed.
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== DECLANK_ISOLATED) return;
+  if (data.type === 'rules') applyBook(data.book);
+});
+
+// Covers the case where the isolated half loaded first and its push arrived
+// before the listener above existed.
+window.postMessage({ source: DECLANK_MAIN, type: 'request-rules' }, window.location.origin);
 
 // ---------- sentence splitting ----------
 //
@@ -316,7 +366,8 @@ window.fetch = async (...args) => {
   if (!interesting) return response;
 
   try {
-    await ready;
+    await engineReady;
+    await rulesOrTimeout;
   } catch (e) {
     console.warn('[declank] engine failed to load, passing through', e);
     return response;
