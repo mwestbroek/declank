@@ -1,11 +1,26 @@
 {
   "manifest_version": 3,
   "name": "Declank",
-  "version": "0.0.1",
-  "content_scripts": [{
-    "matches": ["https://claude.ai/*"],
-    "js": ["declank_engine.js", "declank_wasm.js", "intercept.js"],
-    "world": "MAIN",
-    "run_at": "document_start"
-  }]
+  "version": "0.0.2",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Declank"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["declank_engine.js", "declank_wasm.js", "intercept.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["defaults.js", "storage.js"],
+      "run_at": "document_start"
+    }
+  ]
 }
