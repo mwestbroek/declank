@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use crate::inflect::{noun_forms, verb_forms};
 use std::fmt::Display;
 
@@ -50,7 +52,7 @@ pub struct TemplateRule {
     pub replacement: Vec<ReplacementPart>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum TemplateValidationError {
     EmptyTemplate,
     EmptyLead,

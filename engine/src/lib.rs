@@ -4,24 +4,44 @@ mod inflect;
 mod rules;
 mod rewrite;
 
-use std::sync::OnceLock;
+use serde::{Serialize};
+use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
-use crate::{book::rule_book, compile::{CompiledRules, compile}, rewrite::rewrite};
+use crate::{book::{Book, RuleError, SerialisableBook, deserialise_book}, compile::{CompiledRules, compile}, rewrite::rewrite};
 
-static RULES: OnceLock<CompiledRules> = OnceLock::new();
+static RULES: Mutex<Option<CompiledRules>> = Mutex::new(None);
 
-fn rules() -> &'static CompiledRules {
-    RULES.get_or_init(|| compile(rule_book()))
+
+#[derive(Serialize)]
+struct RuleParseReport {
+    loaded: usize,
+    errors: Vec<RuleError>
 }
 
 
 #[wasm_bindgen]
-pub fn declank(input: &str) -> String { 
-    let rules = rules();
-    rewrite(input, &rules)
+pub fn set_rules(json_rules: &str) -> Result<String, JsValue> {
+    let book: SerialisableBook = serde_json::from_str(json_rules).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let Book { rules, errors, enabled } = deserialise_book(book);
+    let success_count = rules.len();
+    let compiled_rules = compile(rules, enabled);
+    {
+        let mut rules = RULES.lock().unwrap();
+        *rules = Some(compiled_rules);
+    }
+    let report = RuleParseReport { loaded: success_count, errors };
+    serde_json::to_string(&report).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+#[wasm_bindgen]
+pub fn declank(input: &str) -> String {
+    let rules = RULES.lock().unwrap();
+    match rules.as_ref() {
+        Some(compiled) if compiled.enabled => rewrite(input, compiled),
+        _ => input.to_string(),
+    }
+}
 
 #[cfg(test)]
 mod tests {

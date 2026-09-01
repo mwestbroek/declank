@@ -1,4 +1,4 @@
-use crate::rules::{LiteralRule, Rule, RuleKind, TemplateRule, expand_lemma};
+use crate::{book::Book, rules::{LiteralRule, Rule, RuleKind, TemplateRule, expand_lemma}};
 
 pub struct CompiledLiteral {
     pub id: String,
@@ -14,6 +14,7 @@ pub struct CompiledTemplate {
 pub struct CompiledRules {
     pub literals: Vec<CompiledLiteral>,
     pub templates: Vec<CompiledTemplate>,
+    pub enabled: bool,
 }
 
 fn capitalise(s: &str) -> String {
@@ -48,7 +49,7 @@ pub fn compile_template(id: &str, rule: TemplateRule) -> CompiledTemplate {
 
 
 
-pub fn compile(rules: Vec<Rule>) -> CompiledRules {
+pub fn compile(rules: Vec<Rule>, book_enabled: bool) -> CompiledRules {
     let mut literals = Vec::new();
     let mut templates = Vec::new();
 
@@ -74,5 +75,5 @@ pub fn compile(rules: Vec<Rule>) -> CompiledRules {
         }
     }
 
-    CompiledRules { literals, templates }
+    CompiledRules { literals, templates, enabled: book_enabled }
 }
