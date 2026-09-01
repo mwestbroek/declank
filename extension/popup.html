@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Declank</title>
+<style>
+  :root {
+    --paper: #f2f3f4;
+    --surface: #ffffff;
+    --ink: #16191d;
+    --muted: #6b7280;
+    --line: #dfe2e5;
+    --live: #2f5d50;
+    --strike: #9b2c2c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    width: 400px;
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  #count { color: var(--muted); font-size: 12px; }
+
+  .switch {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .switch input { margin: 0; accent-color: var(--live); }
+
+  #status {
+    display: none;
+    padding: 8px 14px;
+    background: #fdf1f1;
+    border-bottom: 1px solid #f0d6d6;
+    color: var(--strike);
+    font-size: 12px;
+  }
+  #status.shown { display: block; }
+
+  #rules {
+    max-height: 340px;
+    overflow-y: auto;
+    background: var(--surface);
+  }
+
+  .rule {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: start;
+    gap: 9px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .rule:last-child { border-bottom: none; }
+  .rule input[type=checkbox] { margin: 2px 0 0; accent-color: var(--live); }
+
+  .body { min-width: 0; }
+
+  .swap {
+    font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  .from { color: var(--strike); text-decoration: line-through; }
+  .to { color: var(--ink); }
+  .to.empty { color: var(--muted); font-style: italic; }
+  .arrow { color: var(--muted); padding: 0 4px; }
+
+  .meta { margin-top: 2px; font-size: 11px; color: var(--muted); }
+
+  .rule.off .swap, .rule.off .meta { opacity: 0.4; }
+
+  .remove {
+    border: 0;
+    background: none;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  .remove:hover { background: #fdf1f1; color: var(--strike); }
+
+  #empty {
+    padding: 22px 14px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  details {
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+  }
+  summary {
+    padding: 10px 14px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  summary::marker { color: var(--muted); }
+
+  form { padding: 0 14px 14px; display: grid; gap: 8px; }
+
+  label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+
+  input[type=text], select {
+    font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 6px 7px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  select { font-family: inherit; }
+  input[type=text]:focus, select:focus {
+    outline: 2px solid var(--live);
+    outline-offset: -1px;
+  }
+
+  button[type=submit] {
+    justify-self: start;
+    padding: 6px 14px;
+    border: 0;
+    border-radius: 3px;
+    background: var(--live);
+    color: #fff;
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  #hint { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Declank</h1>
+    <div id="count"></div>
+  </div>
+  <label class="switch">
+    <input type="checkbox" id="master">
+    <span>Rewriting on</span>
+  </label>
+</header>
+
+<div id="status"></div>
+
+<div id="rules"></div>
+<div id="empty" hidden>No rules yet. Add one below.</div>
+
+<details>
+  <summary>Add a rule</summary>
+  <form id="add">
+    <label>
+      Kind
+      <select id="kind">
+        <option value="literal">Literal phrase</option>
+        <option value="lemma-verb">Verb (all forms)</option>
+        <option value="lemma-noun">Noun (singular and plural)</option>
+        <option value="template">Template with holes</option>
+      </select>
+    </label>
+    <label>
+      Find
+      <input type="text" id="pattern" required autocomplete="off" spellcheck="false">
+    </label>
+    <label>
+      Replace with
+      <input type="text" id="replacement" autocomplete="off" spellcheck="false">
+    </label>
+    <div id="hint"></div>
+    <button type="submit">Add rule</button>
+  </form>
+</details>
+
+<script src="declank_engine.js"></script>
+<script src="declank_wasm.js"></script>
+<script src="defaults.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>
