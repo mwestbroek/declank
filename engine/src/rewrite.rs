@@ -171,6 +171,7 @@ mod tests {
         CompiledRules {
             literals,
             templates,
+            enabled: true,
         }
     }
 
