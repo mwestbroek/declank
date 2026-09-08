@@ -10,11 +10,44 @@ const engineReady = wasm_bindgen({ module_or_path: wasmBytes }).then(() => {
   console.log('[declank] engine ready');
 });
 
-const declank = (s) => wasm_bindgen.declank(s);
-
 // Hold back at most this much text while waiting for a sentence boundary.
 // Bounds both latency and how much could be lost if a stream ends abnormally.
 const MAX_HOLD = 400;
+
+// ---------- inspection ----------
+// Exposed on the page for poking at from the console
+
+const __declank = { rules: [], lastRun: null };
+window.__declank = __declank;
+
+// ---------- telemetry ----------
+function newRun(kind) {
+  return { kind, calls: 0, chars: 0, changed: 0, ms: 0, started: performance.now() };
+}
+
+let run = newRun('idle');
+
+function declank(text) {
+  if (text.length === 0) return text;
+  const t0 = performance.now();
+  const out = wasm_bindgen.declank(text);
+  run.ms += performance.now() - t0;
+  run.calls++;
+  run.chars += text.length;
+  if (out !== text) run.changed++;
+  return out;
+}
+
+function reportRun() {
+  const wall = performance.now() - run.started;
+  const perCall = run.calls ? (run.ms / run.calls).toFixed(3) : '0';
+  console.log(
+    `[declank] ${run.kind}: ${run.changed}/${run.calls} units rewritten, ` +
+    `${run.chars} chars, ${run.ms.toFixed(1)}ms in engine (${perCall}ms/unit), ` +
+    `${wall.toFixed(0)}ms wall`
+  );
+  __declank.lastRun = { ...run, wall };
+}
 
 // ---------- rules ----------
 //
@@ -42,15 +75,39 @@ const rulesOrTimeout = Promise.race([
 
 async function applyBook(json) {
   await engineReady;
+
+  // Summarise what arrived before handing it over, so the log reflects the
+  // book as authored rather than the engine's count of what deserialised.
+  const active = [];
+  const off = [];
+  try {
+    const book = JSON.parse(json);
+    __declank.rules = book.rules || [];
+    for (const r of __declank.rules) {
+      (r.enabled === false ? off : active).push(r.id);
+    }
+    if (book.enabled === false) {
+      console.log(`[declank] rewriting paused (${__declank.rules.length} rules stored)`);
+    }
+  } catch (e) {
+    console.warn('[declank] could not read the rule book', e);
+  }
+
   try {
     const report = JSON.parse(wasm_bindgen.set_rules(json));
     if (report.errors && report.errors.length > 0) {
-      console.warn('[declank] rules rejected:', report.errors);
+      for (const e of report.errors) {
+        console.warn(`[declank] rule "${e.id}" rejected: ${e.error}`);
+      }
     }
-    console.log(`[declank] ${report.loaded} rules loaded`);
+    console.log(
+      `[declank] ${active.length} rules on, ${off.length} off` +
+      (off.length ? ` (off: ${off.join(', ')})` : '')
+    );
   } catch (e) {
     console.warn('[declank] rule book rejected, keeping previous rules', e);
   }
+
   markRulesSettled('settled');
 }
 
@@ -163,12 +220,16 @@ function rewriteStream(response) {
   let sentenceBuffer = '';
   let pendingEvent = null;
   let lastIndex = 0;
-  let flushedAtEnd = false;
+  let sawDelta = false;
 
   // One response is one message, so a single fence state spans the stream.
   const fenceState = { inFence: false };
 
-  // Emit whatever is held back as a synthetic delta event.
+  run = newRun('stream');
+
+  // Emit whatever is held back as a synthetic delta event. The trailing empty
+  // string becomes the blank line that terminates the frame; without it the
+  // next frame is folded into this one and the app rejects the stream.
   function flushSentenceBuffer() {
     if (sentenceBuffer.length === 0) return [];
     const text = processText(sentenceBuffer, fenceState);
@@ -178,7 +239,7 @@ function rewriteStream(response) {
       index: lastIndex,
       delta: { type: 'text_delta', text }
     };
-    return ['event: content_block_delta', 'data: ' + JSON.stringify(event)];
+    return ['event: content_block_delta', 'data: ' + JSON.stringify(event), ''];
   }
 
   function processLine(line) {
@@ -205,6 +266,7 @@ function rewriteStream(response) {
     }
 
     if (obj?.type === 'content_block_delta' && typeof obj?.delta?.text === 'string') {
+      sawDelta = true;
       if (typeof obj.index === 'number') lastIndex = obj.index;
 
       sentenceBuffer += obj.delta.text;
@@ -223,9 +285,11 @@ function rewriteStream(response) {
         sentenceBuffer = '';
       }
 
+
       obj.delta.text = ready;
       return emit('data: ' + JSON.stringify(obj));
     }
+
 
     // Flush the tail before the block or message closes.
     if (
@@ -233,9 +297,7 @@ function rewriteStream(response) {
       obj?.type === 'message_delta' ||
       obj?.type === 'message_stop'
     ) {
-      const injected = flushSentenceBuffer();
-      if (injected.length > 0) flushedAtEnd = true;
-      return emit(line, injected);
+      return emit(line, flushSentenceBuffer());
     }
 
     return emit(line);
@@ -264,15 +326,18 @@ function rewriteStream(response) {
       out.push(...flushSentenceBuffer());
 
       if (out.length > 0) {
-        controller.enqueue(encoder.encode(out.join('\n')));
+        controller.enqueue(encoder.encode(out.join('\n') + '\n\n'));
       }
-      if (!flushedAtEnd && sentenceBuffer.length > 0) {
+      if (sentenceBuffer.length > 0) {
         console.warn('[declank] stream ended with text still buffered');
       }
       if (fenceState.inFence) {
         console.warn('[declank] stream ended inside an unclosed code fence');
       }
-      console.log('[declank] stream done');
+      if (!sawDelta) {
+        console.warn('[declank] stream contained no text deltas; nothing to rewrite');
+      }
+      reportRun();
     }
   });
 
@@ -285,21 +350,17 @@ function rewriteStream(response) {
 
 // ---------- history path ----------
 
-let historyHits = 0;
-
 function rewriteMessage(m) {
   if (m?.sender !== 'assistant') return;
 
   if (typeof m.text === 'string') {
-    const after = rewriteWhole(m.text);
-    if (after !== m.text) { historyHits++; m.text = after; }
+    m.text = rewriteWhole(m.text);
   }
 
   if (Array.isArray(m.content)) {
     for (const block of m.content) {
       if (block?.type === 'text' && typeof block.text === 'string') {
-        const after = rewriteWhole(block.text);
-        if (after !== block.text) { historyHits++; block.text = after; }
+        block.text = rewriteWhole(block.text);
       }
     }
   }
@@ -327,7 +388,7 @@ async function rewriteHistory(response) {
 
   if (doc === null || typeof doc !== 'object') return passthrough();
 
-  historyHits = 0;
+  run = newRun('history');
 
   try {
     if (Array.isArray(doc)) {
@@ -342,7 +403,8 @@ async function rewriteHistory(response) {
     return passthrough();
   }
 
-  console.log(`[declank] history rewritten. replacements: ${historyHits}`);
+  // Silent when a poll or prefetch turns out to hold no messages.
+  if (run.calls > 0) reportRun();
 
   const headers = new Headers(response.headers);
   headers.delete('content-length');
@@ -355,6 +417,8 @@ async function rewriteHistory(response) {
 }
 
 // ---------- dispatch ----------
+const COMPLETION_URL = /\/chat_conversations\/[^/]+\/completion(\?|$)/;
+const HISTORY_URL = /\/chat_conversations(\/|\?|$)/;
 
 window.fetch = async (...args) => {
   const response = await originalFetch(...args);
@@ -362,8 +426,15 @@ window.fetch = async (...args) => {
 
   if (!response.ok || !response.body) return response;
 
-  const interesting = url.includes('/completion') || url.includes('/chat_conversations');
-  if (!interesting) return response;
+  const isCompletion = COMPLETION_URL.test(url);
+  const isHistory = !isCompletion && HISTORY_URL.test(url);
+  if (!isCompletion && !isHistory) return response;
+
+  // A URL can match the shape and still not be what it looks like, so the
+  // content type is checked before anything is wrapped.
+  const contentType = response.headers.get('content-type') || '';
+  if (isCompletion && !contentType.includes('text/event-stream')) return response;
+  if (isHistory && !contentType.includes('application/json')) return response;
 
   try {
     await engineReady;
@@ -373,11 +444,5 @@ window.fetch = async (...args) => {
     return response;
   }
 
-  if (url.includes('/completion')) {
-    console.log('[declank] intercepting stream');
-    return rewriteStream(response);
-  }
-
-  console.log('[declank] intercepting history');
-  return rewriteHistory(response);
+  return isCompletion ? rewriteStream(response) : rewriteHistory(response);
 };
