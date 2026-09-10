@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Declank",
+  "name": "Deslop",
   "version": "0.0.2",
   "permissions": ["storage"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Declank"
+    "default_title": "Deslop"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
@@ -13,7 +13,7 @@
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["declank_engine.js", "declank_wasm.js", "intercept.js"],
+      "js": ["deslop_engine.js", "deslop_wasm.js", "intercept.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },

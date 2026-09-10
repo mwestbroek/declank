@@ -1,16 +1,16 @@
 // Shared by the isolated-world content script and the popup. Both load this as
 // a plain script, so everything here is a top-level global.
 
-const DECLANK_STORAGE_KEY = 'declank_book';
+const DESLOP_STORAGE_KEY = 'deslop_book';
 
 // Message tags. Both worlds listen on the same window, and so does the page, so
 // every message carries a source tag and anything unrecognised is ignored.
-const DECLANK_MAIN = 'declank-main';
-const DECLANK_ISOLATED = 'declank-isolated';
+const DESLOP_MAIN = 'deslop-main';
+const DESLOP_ISOLATED = 'deslop-isolated';
 
 // Written to storage on first run. After that, storage is the only source of
 // truth and this is never consulted again.
-const DECLANK_DEFAULT_BOOK = {
+const DESLOP_DEFAULT_BOOK = {
   version: 1,
   enabled: true,
   rules: [

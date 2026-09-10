@@ -1,13 +1,13 @@
-console.log('[declank] installed');
+console.log('[deslop] installed');
 
 const originalFetch = window.fetch;
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
-const wasmBytes = Uint8Array.from(atob(self.DECLANK_WASM_B64), c => c.charCodeAt(0));
+const wasmBytes = Uint8Array.from(atob(self.DESLOP_WASM_B64), c => c.charCodeAt(0));
 
 const engineReady = wasm_bindgen({ module_or_path: wasmBytes }).then(() => {
-  console.log('[declank] engine ready');
+  console.log('[deslop] engine ready');
 });
 
 // Hold back at most this much text while waiting for a sentence boundary.
@@ -17,8 +17,8 @@ const MAX_HOLD = 400;
 // ---------- inspection ----------
 // Exposed on the page for poking at from the console
 
-const __declank = { rules: [], lastRun: null };
-window.__declank = __declank;
+const __deslop = { rules: [], lastRun: null };
+window.__deslop = __deslop;
 
 // ---------- telemetry ----------
 function newRun(kind) {
@@ -27,10 +27,10 @@ function newRun(kind) {
 
 let run = newRun('idle');
 
-function declank(text) {
+function deslop(text) {
   if (text.length === 0) return text;
   const t0 = performance.now();
-  const out = wasm_bindgen.declank(text);
+  const out = wasm_bindgen.deslop(text);
   run.ms += performance.now() - t0;
   run.calls++;
   run.chars += text.length;
@@ -42,11 +42,11 @@ function reportRun() {
   const wall = performance.now() - run.started;
   const perCall = run.calls ? (run.ms / run.calls).toFixed(3) : '0';
   console.log(
-    `[declank] ${run.kind}: ${run.changed}/${run.calls} units rewritten, ` +
+    `[deslop] ${run.kind}: ${run.changed}/${run.calls} units rewritten, ` +
     `${run.chars} chars, ${run.ms.toFixed(1)}ms in engine (${perCall}ms/unit), ` +
     `${wall.toFixed(0)}ms wall`
   );
-  __declank.lastRun = { ...run, wall };
+  __deslop.lastRun = { ...run, wall };
 }
 
 // ---------- rules ----------
@@ -57,8 +57,8 @@ function reportRun() {
 //
 // The tags must match defaults.js. They are duplicated here because the MAIN
 // world cannot load that file: it is an isolated-world script.
-const DECLANK_MAIN = 'declank-main';
-const DECLANK_ISOLATED = 'declank-isolated';
+const DESLOP_MAIN = 'deslop-main';
+const DESLOP_ISOLATED = 'deslop-isolated';
 
 // If the isolated half never answers, stop waiting and carry on. With no rules
 // loaded the engine returns its input unchanged, so interception is harmless.
@@ -82,30 +82,30 @@ async function applyBook(json) {
   const off = [];
   try {
     const book = JSON.parse(json);
-    __declank.rules = book.rules || [];
-    for (const r of __declank.rules) {
+    __deslop.rules = book.rules || [];
+    for (const r of __deslop.rules) {
       (r.enabled === false ? off : active).push(r.id);
     }
     if (book.enabled === false) {
-      console.log(`[declank] rewriting paused (${__declank.rules.length} rules stored)`);
+      console.log(`[deslop] rewriting paused (${__deslop.rules.length} rules stored)`);
     }
   } catch (e) {
-    console.warn('[declank] could not read the rule book', e);
+    console.warn('[deslop] could not read the rule book', e);
   }
 
   try {
     const report = JSON.parse(wasm_bindgen.set_rules(json));
     if (report.errors && report.errors.length > 0) {
       for (const e of report.errors) {
-        console.warn(`[declank] rule "${e.id}" rejected: ${e.error}`);
+        console.warn(`[deslop] rule "${e.id}" rejected: ${e.error}`);
       }
     }
     console.log(
-      `[declank] ${active.length} rules on, ${off.length} off` +
+      `[deslop] ${active.length} rules on, ${off.length} off` +
       (off.length ? ` (off: ${off.join(', ')})` : '')
     );
   } catch (e) {
-    console.warn('[declank] rule book rejected, keeping previous rules', e);
+    console.warn('[deslop] rule book rejected, keeping previous rules', e);
   }
 
   markRulesSettled('settled');
@@ -115,13 +115,13 @@ async function applyBook(json) {
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   const data = event.data;
-  if (!data || data.source !== DECLANK_ISOLATED) return;
+  if (!data || data.source !== DESLOP_ISOLATED) return;
   if (data.type === 'rules') applyBook(data.book);
 });
 
 // Covers the case where the isolated half loaded first and its push arrived
 // before the listener above existed.
-window.postMessage({ source: DECLANK_MAIN, type: 'request-rules' }, window.location.origin);
+window.postMessage({ source: DESLOP_MAIN, type: 'request-rules' }, window.location.origin);
 
 // ---------- sentence splitting ----------
 //
@@ -187,7 +187,7 @@ function rewriteInline(text) {
   // pieces can be reassembled exactly.
   return text
     .split(/(`[^`\n]*`)/)
-    .map(part => (part.startsWith('`') ? part : declank(part)))
+    .map(part => (part.startsWith('`') ? part : deslop(part)))
     .join('');
 }
 
@@ -261,7 +261,7 @@ function rewriteStream(response) {
       obj = JSON.parse(line.slice(6));
     } catch (e) {
       // Should not happen now that lines are reassembled before parsing.
-      console.warn('[declank] unparseable data line, passing through');
+      console.warn('[deslop] unparseable data line, passing through');
       return emit(line);
     }
 
@@ -329,13 +329,13 @@ function rewriteStream(response) {
         controller.enqueue(encoder.encode(out.join('\n') + '\n\n'));
       }
       if (sentenceBuffer.length > 0) {
-        console.warn('[declank] stream ended with text still buffered');
+        console.warn('[deslop] stream ended with text still buffered');
       }
       if (fenceState.inFence) {
-        console.warn('[declank] stream ended inside an unclosed code fence');
+        console.warn('[deslop] stream ended inside an unclosed code fence');
       }
       if (!sawDelta) {
-        console.warn('[declank] stream contained no text deltas; nothing to rewrite');
+        console.warn('[deslop] stream contained no text deltas; nothing to rewrite');
       }
       reportRun();
     }
@@ -399,7 +399,7 @@ async function rewriteHistory(response) {
       rewriteConversation(doc);
     }
   } catch (e) {
-    console.warn('[declank] history rewrite failed, passing through', e);
+    console.warn('[deslop] history rewrite failed, passing through', e);
     return passthrough();
   }
 
@@ -440,7 +440,7 @@ window.fetch = async (...args) => {
     await engineReady;
     await rulesOrTimeout;
   } catch (e) {
-    console.warn('[declank] engine failed to load, passing through', e);
+    console.warn('[deslop] engine failed to load, passing through', e);
     return response;
   }
 

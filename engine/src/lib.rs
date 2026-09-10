@@ -49,7 +49,7 @@ pub fn set_rules(json_rules: &str) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn declank(input: &str) -> String {
+pub fn deslop(input: &str) -> String {
     let rules = RULES.lock().unwrap();
     match rules.as_ref() {
         Some(compiled) if compiled.enabled => rewrite(input, compiled),
@@ -79,27 +79,27 @@ mod tests {
     }"#;
 
     #[test]
-    fn set_rules_loads_a_book_and_declank_uses_it() {
+    fn set_rules_loads_a_book_and_deslop_uses_it() {
         let _g = guard();
         let report = set_rules_inner(GOOD_BOOK).unwrap();
         assert!(report.contains("\"loaded\":2"), "report was {report}");
-        assert_eq!(declank("We utilise this."), "We use this.");
+        assert_eq!(deslop("We utilise this."), "We use this.");
     }
 
     #[test]
     fn lemma_expansion_survives_the_round_trip() {
         let _g = guard();
         set_rules_inner(GOOD_BOOK).unwrap();
-        assert_eq!(declank("She utilises this."), "She uses this.");
-        assert_eq!(declank("They utilised this."), "They used this.");
-        assert_eq!(declank("We are utilising this."), "We are using this.");
+        assert_eq!(deslop("She utilises this."), "She uses this.");
+        assert_eq!(deslop("They utilised this."), "They used this.");
+        assert_eq!(deslop("We are utilising this."), "We are using this.");
     }
 
     #[test]
     fn an_empty_book_rewrites_nothing() {
         let _g = guard();
         set_rules_inner(r#"{"version":1,"rules":[]}"#).unwrap();
-        assert_eq!(declank("We utilise this."), "We utilise this.");
+        assert_eq!(deslop("We utilise this."), "We utilise this.");
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
         let report = set_rules_inner(json).unwrap();
         // Rules still load; the switch only gates rewriting.
         assert!(report.contains("\"loaded\":1"), "report was {report}");
-        assert_eq!(declank("We utilise this."), "We utilise this.");
+        assert_eq!(deslop("We utilise this."), "We utilise this.");
     }
 
     #[test]
@@ -129,8 +129,8 @@ mod tests {
             ]
         }"#;
         set_rules_inner(json).unwrap();
-        assert_eq!(declank("We utilise this."), "We utilise this.");
-        assert_eq!(declank("a rich tapestry of things"), "a range of things");
+        assert_eq!(deslop("We utilise this."), "We utilise this.");
+        assert_eq!(deslop("a rich tapestry of things"), "a range of things");
     }
 
     #[test]
@@ -138,7 +138,7 @@ mod tests {
         let _g = guard();
         set_rules_inner(GOOD_BOOK).unwrap();
         assert!(set_rules_inner("{ not json").is_err());
-        assert_eq!(declank("We utilise this."), "We use this.");
+        assert_eq!(deslop("We utilise this."), "We use this.");
     }
 
     #[test]
@@ -157,7 +157,7 @@ mod tests {
         assert!(report.contains("broken"), "report was {report}");
         assert!(report.contains("lead is empty"), "report was {report}");
         // The good rule still works.
-        assert_eq!(declank("We utilise this."), "We use this.");
+        assert_eq!(deslop("We utilise this."), "We use this.");
     }
 
     #[test]
@@ -171,7 +171,7 @@ mod tests {
         }"#;
         set_rules_inner(json).unwrap();
         assert_eq!(
-            declank("We reviewed the £4.2m figure in question today."),
+            deslop("We reviewed the £4.2m figure in question today."),
             "We reviewed the £4.2m figure today."
         );
     }

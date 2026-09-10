@@ -3,7 +3,7 @@
 // script uses, so a rule accepted here cannot be rejected there. Duplicating
 // the validation in JavaScript would drift.
 
-const wasmBytes = Uint8Array.from(atob(self.DECLANK_WASM_B64), c => c.charCodeAt(0));
+const wasmBytes = Uint8Array.from(atob(self.DESLOP_WASM_B64), c => c.charCodeAt(0));
 const engineReady = wasm_bindgen({ module_or_path: wasmBytes });
 
 const els = {
@@ -31,12 +31,12 @@ let book = null;
 // ---------- storage ----------
 
 async function readBook() {
-  const got = await chrome.storage.local.get(DECLANK_STORAGE_KEY);
-  return got[DECLANK_STORAGE_KEY] || DECLANK_DEFAULT_BOOK;
+  const got = await chrome.storage.local.get(DESLOP_STORAGE_KEY);
+  return got[DESLOP_STORAGE_KEY] || DESLOP_DEFAULT_BOOK;
 }
 
 async function writeBook() {
-  await chrome.storage.local.set({ [DECLANK_STORAGE_KEY]: book });
+  await chrome.storage.local.set({ [DESLOP_STORAGE_KEY]: book });
 }
 
 // ---------- validation ----------
@@ -192,7 +192,7 @@ els.form.addEventListener('submit', async (event) => {
 // Another tab or window may have changed the book.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  const change = changes[DECLANK_STORAGE_KEY];
+  const change = changes[DESLOP_STORAGE_KEY];
   if (!change || !change.newValue) return;
   book = change.newValue;
   render();
